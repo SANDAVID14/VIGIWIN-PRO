@@ -279,6 +279,20 @@ class DatabaseManager:
                     return row["value"]
             return default
 
+    def get_all_settings(self) -> Dict[str, Any]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value FROM settings")
+            rows = cursor.fetchall()
+            result = {}
+            for r in rows:
+                try:
+                    result[r["key"]] = json.loads(r["value"])
+                except Exception:
+                    result[r["key"]] = r["value"]
+            return result
+
+
     # --- Operaciones de Cámaras ---
     def get_cameras(self) -> List[Dict[str, Any]]:
         with self.get_connection() as conn:

@@ -15,6 +15,7 @@ a = Analysis(
         'vigiwin.core.rbac',
         'vigiwin.core.backup',
         'vigiwin.core.audio',
+        'vigiwin.core.updater',
         'vigiwin.vision',
         'vigiwin.vision.camera_manager',
         'vigiwin.vision.camera_stream',
@@ -71,6 +72,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='vigiwin/assets/icon.ico',
 )
 coll = COLLECT(
     exe,

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtGui import QCursor, QPixmap, QIcon
 
 from vigiwin.core.database import DatabaseManager
 from vigiwin.core.audio import AudioManager
@@ -31,8 +31,14 @@ class VigiWinMainWindow(QMainWindow):
     def __init__(self, rbac_manager=None):
         super().__init__()
         self.setWindowTitle("VIGI-WIN PRO v1.0 - Sistema Inteligente de Vigilancia de Puertas, Personas y Vehículos")
-        self.resize(1200, 780)
-        self.setMinimumSize(920, 580)
+
+        # Cargar icono vanguardista de la aplicación
+        assets_icon = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(assets_icon):
+            self.setWindowIcon(QIcon(assets_icon))
+
+        # Configuración adaptable a cualquier monitor y resolución en Windows 10/11
+        self.auto_adjust_screen_geometry()
 
         # Aplicar el tema gráfico Slate 950 + Emerald 500
         self.setStyleSheet(DARK_THEME_QSS)
@@ -325,6 +331,50 @@ class VigiWinMainWindow(QMainWindow):
         # Inicializar selector de usuarios y aplicar restricciones iniciales de sesión
         self._populate_header_users()
         self._on_user_session_changed(self.rbac_mgr.current_user or {})
+
+    def auto_adjust_screen_geometry(self):
+        """Ajusta automáticamente el tamaño, escala y posición de la ventana según el monitor y resolución activa."""
+        screen = QApplication.primaryScreen()
+        if not screen:
+            self.resize(1200, 780)
+            self.setMinimumSize(920, 580)
+            return
+
+        geo = screen.availableGeometry()
+        screen_w = geo.width()
+        screen_h = geo.height()
+
+        # Si la resolución disponible es compacta (ej. laptops 1366x768, 1280x720, o escalado 125%/150%)
+        # se maximiza automáticamente para aprovechar todo el espacio útil sin desbordar la barra de tareas.
+        if screen_w <= 1366 or screen_h <= 820:
+            min_w = min(840, int(screen_w * 0.85))
+            min_h = min(540, int(screen_h * 0.85))
+            self.setMinimumSize(min_w, min_h)
+            self.showMaximized()
+        else:
+            # En pantallas estándar o grandes (Full HD, 2K, 4K, UltraWide)
+            target_w = min(int(screen_w * 0.88), 1600)
+            target_h = min(int(screen_h * 0.88), 980)
+            target_w = max(target_w, 960)
+            target_h = max(target_h, 620)
+            self.setMinimumSize(920, 580)
+            self.resize(target_w, target_h)
+            # Centrado automático en la pantalla actual
+            x = geo.left() + (screen_w - target_w) // 2
+            y = geo.top() + (screen_h - target_h) // 2
+            self.move(x, y)
+
+        # Monitorear cambios dinámicos de resolución o monitor
+        try:
+            screen.geometryChanged.connect(self._on_screen_geometry_changed)
+        except Exception:
+            pass
+
+    def _on_screen_geometry_changed(self, geo):
+        """Re-ajuste en caliente si el usuario traslada la ventana a otro monitor o cambia la resolución."""
+        if not self.isMaximized():
+            if self.width() > geo.width() or self.height() > geo.height():
+                self.auto_adjust_screen_geometry()
 
     def switch_tab(self, index: int):
         self.tab_stack.setCurrentIndex(index)

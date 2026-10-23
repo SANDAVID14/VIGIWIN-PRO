@@ -10,10 +10,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QFileDialog, QMessageBox, QFrame, QDialog,
-    QSizePolicy, QSplitter
+    QSizePolicy, QSplitter, QApplication
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QPixmap, QImage
+from PySide6.QtGui import QColor, QCursor, QPixmap, QImage, QIcon
 
 from vigiwin.core.config import get_snapshots_dir
 
@@ -29,7 +29,24 @@ class SnapshotViewerDialog(QDialog):
         etype = event_data.get("event_type", "Alerta")
         ts = event_data.get("timestamp", "")
         self.setWindowTitle(f"Inspección Forense de Evidencia | {cam} - {etype} ({ts})")
-        self.resize(920, 640)
+
+        # Adaptabilidad automática a la resolución del monitor
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(920, max(480, int(avail.width() * 0.88)))
+            target_h = min(640, max(360, int(avail.height() * 0.82)))
+            self.resize(target_w, target_h)
+            self.setMinimumSize(460, 340)
+        else:
+            self.resize(920, 640)
+            self.setMinimumSize(460, 340)
+
+        # Icono de ventana
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self.setStyleSheet("""
             QDialog {
                 background-color: #0b1120;

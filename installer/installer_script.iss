@@ -15,6 +15,7 @@ OutputDir=..\installer_output
 OutputBaseFilename=VigiWinPro_Instalador_v1.0_Windows
 Compression=lzma2/max
 SolidCompression=yes
+SetupIconFile=..\vigiwin\assets\icon.ico
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
@@ -29,9 +30,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\VigiWinPro\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\VIGI-WIN PRO"; Filename: "{app}\VigiWinPro.exe"
+Name: "{group}\VIGI-WIN PRO"; Filename: "{app}\VigiWinPro.exe"; IconFilename: "{app}\_internal\vigiwin\assets\icon.ico"
 Name: "{group}\Desinstalar VIGI-WIN PRO"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\VIGI-WIN PRO"; Filename: "{app}\VigiWinPro.exe"; Tasks: desktopicon
+Name: "{autodesktop}\VIGI-WIN PRO"; Filename: "{app}\VigiWinPro.exe"; Tasks: desktopicon; IconFilename: "{app}\_internal\vigiwin\assets\icon.ico"
+
 
 [Run]
 Filename: "{app}\VigiWinPro.exe"; Description: "{cm:LaunchProgram,VIGI-WIN PRO}"; Flags: nowait postinstall skipifsilent

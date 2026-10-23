@@ -3,10 +3,11 @@ VIGI-WIN PRO - Diálogo de Inicio de Sesión y Conmutación de Usuario (RBAC)
 Diseño oscuro Slate 950 + Emerald 500 acorde a 'Backend vigiwin.html'.
 Permite autenticación segura inicial y cambio de usuario en caliente dentro de la aplicación.
 """
+import os
 from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QFrame, QSizePolicy, QMessageBox
+    QPushButton, QFrame, QSizePolicy, QMessageBox, QApplication
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor, QIcon, QAction
@@ -25,8 +26,19 @@ class LoginDialog(QDialog):
         self.setWindowTitle(
             "VIGI-WIN PRO - Cambiar de Usuario" if is_switch_user else "VIGI-WIN PRO - Iniciar Sesión"
         )
-        self.setFixedSize(440, 530)
+        # Adaptabilidad automática a la resolución de pantalla
+        screen = QApplication.primaryScreen()
+        avail_h = screen.availableGeometry().height() if screen else 768
+        target_h = min(530, max(440, int(avail_h * 0.85)))
+        self.resize(440, target_h)
+        self.setMinimumSize(380, 420)
         self.setModal(True)
+
+        # Icono de ventana
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self.setStyleSheet("""
             QDialog {
                 background-color: #0b1120;

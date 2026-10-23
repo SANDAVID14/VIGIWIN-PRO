@@ -11,7 +11,7 @@ from typing import Optional, Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QComboBox, QSlider, QCheckBox, QSpinBox, QSizePolicy,
-    QStackedWidget, QGridLayout
+    QStackedWidget, QGridLayout, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap, QCursor
@@ -483,7 +483,27 @@ class SurveillanceTab(QWidget):
         ai_layout.addWidget(door_rules_box)
         ai_layout.addStretch()
 
-        main_layout.addWidget(ai_panel, stretch=3)
+        scroll_ai = QScrollArea()
+        scroll_ai.setWidgetResizable(True)
+        scroll_ai.setMaximumWidth(360)
+        scroll_ai.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #0f172a;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #334155;
+                border-radius: 4px;
+            }
+        """)
+        scroll_ai.setWidget(ai_panel)
+
+        main_layout.addWidget(scroll_ai, stretch=3)
 
     # -----------------------------------------------------------------
     # Gestión del Modo Cuadrícula 2x2

@@ -10,13 +10,26 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# Configuración universal de alta resolución DPI para Windows 10/11
+os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+
 from PySide6.QtWidgets import (
     QApplication, QWizard, QWizardPage, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QCheckBox, QProgressBar, QPushButton,
     QFileDialog, QMessageBox, QFrame
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QIcon
 
 class WelcomePage(QWizardPage):
     def __init__(self):
@@ -156,21 +169,65 @@ class ProgressInstallPage(QWizardPage):
 
     def _step_create_shortcuts(self):
         self.prog_bar.setValue(90)
-        self.lbl_status.setText("Generando accesos directos en Windows...")
+        self.lbl_status.setText("Generando accesos directos e icono vanguardista en Windows...")
         dest_dir = self.field("install_path")
         launcher_path = os.path.join(dest_dir, "run_app.py")
+        ico_path = os.path.join(dest_dir, "vigiwin", "assets", "icon.ico")
+        target_exe = os.path.join(dest_dir, "VigiWinPro.exe")
 
-        # Crear script .bat ejecutable directo en destino
+        # Seleccionar ejecutable destino
+        if os.path.exists(target_exe):
+            target_path = target_exe
+            target_args = ""
+        else:
+            # En modo entorno Python local
+            target_path = sys.executable
+            target_args = f'"{launcher_path}"'
+
+        # Script .bat auxiliar
         bat_launcher = os.path.join(dest_dir, "Iniciar_VigiWinPro.bat")
         with open(bat_launcher, "w", encoding="utf-8") as f:
-            f.write(f'@echo off\ncd /d "{dest_dir}"\nstart pythonw run_app.py\n')
+            f.write(f'@echo off\ncd /d "{dest_dir}"\nstart "" pythonw run_app.py\n')
 
-        # Si se seleccionó icono en escritorio
+        # Crear Acceso Directo (.lnk) en el Escritorio con icono vanguardista
         if self.field("create_desktop_icon"):
             try:
                 desktop = os.path.join(os.path.expanduser("~"), "Desktop")
                 if os.path.exists(desktop):
-                    shutil.copy2(bat_launcher, os.path.join(desktop, "VIGI-WIN PRO.bat"))
+                    shortcut_lnk = os.path.join(desktop, "VIGI-WIN PRO.lnk")
+                    ps_cmd = (
+                        f"$WshShell = New-Object -ComObject WScript.Shell; "
+                        f"$Shortcut = $WshShell.CreateShortcut('{shortcut_lnk}'); "
+                        f"$Shortcut.TargetPath = '{target_path}'; "
+                        f"$Shortcut.Arguments = '{target_args}'; "
+                        f"$Shortcut.WorkingDirectory = '{dest_dir}'; "
+                        f"$Shortcut.IconLocation = '{ico_path},0'; "
+                        f"$Shortcut.Description = 'VIGI-WIN PRO - Sistema Inteligente de Vigilancia'; "
+                        f"$Shortcut.Save();"
+                    )
+                    subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=12)
+            except Exception as e:
+                self.log_label.setText(f"Aviso acceso directo: {e}")
+
+        # Crear Acceso Directo en Menú Inicio de Windows
+        if self.field("create_startmenu_icon"):
+            try:
+                appdata = os.environ.get("APPDATA", "")
+                if appdata:
+                    start_programs = os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs", "VigiWinPro")
+                    os.makedirs(start_programs, exist_ok=True)
+                    shortcut_start = os.path.join(start_programs, "VIGI-WIN PRO.lnk")
+                    ps_cmd = (
+                        f"$WshShell = New-Object -ComObject WScript.Shell; "
+                        f"$Shortcut = $WshShell.CreateShortcut('{shortcut_start}'); "
+                        f"$Shortcut.TargetPath = '{target_path}'; "
+                        f"$Shortcut.Arguments = '{target_args}'; "
+                        f"$Shortcut.WorkingDirectory = '{dest_dir}'; "
+                        f"$Shortcut.IconLocation = '{ico_path},0'; "
+                        f"$Shortcut.Description = 'VIGI-WIN PRO - Sistema Inteligente de Vigilancia'; "
+                        f"$Shortcut.Save();"
+                    )
+                    subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=12)
             except Exception:
                 pass
 
@@ -216,7 +273,23 @@ class VigiWinInstallerWizard(QWizard):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Asistente de Instalación - VIGI-WIN PRO v1.0")
-        self.resize(600, 420)
+
+        # Cargar icono vanguardista oficial
+        base_dir = Path(__file__).resolve().parent.parent
+        icon_path = base_dir / "vigiwin" / "assets" / "icon.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
+        # Adaptabilidad automática a la resolución del monitor
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(620, max(480, int(avail.width() * 0.85)))
+            target_h = min(440, max(360, int(avail.height() * 0.75)))
+            self.resize(target_w, target_h)
+        else:
+            self.resize(600, 420)
+
         self.setWizardStyle(QWizard.ModernStyle)
         self.setStyleSheet("""
             QWizard {
@@ -272,7 +345,17 @@ class VigiWinInstallerWizard(QWizard):
         super().accept()
 
 def main():
+    if hasattr(Qt, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     app = QApplication(sys.argv)
+    base_dir = Path(__file__).resolve().parent.parent
+    icon_path = base_dir / "vigiwin" / "assets" / "icon.ico"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     wizard = VigiWinInstallerWizard()
     wizard.show()
     sys.exit(app.exec())

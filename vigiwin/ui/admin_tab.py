@@ -10,13 +10,14 @@ from PySide6.QtWidgets import (
     QFrame, QLineEdit, QComboBox, QSpinBox, QFileDialog, QMessageBox,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
     QGridLayout, QGroupBox, QDialog, QFormLayout, QAbstractItemView,
-    QSlider
+    QSlider, QProgressBar, QTextEdit, QApplication
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor, QColor, QPixmap
+from PySide6.QtGui import QCursor, QColor, QPixmap, QIcon
 
 from vigiwin.core.backup import BackupManager
 from vigiwin.core.rbac import RBACManager
+from vigiwin.core.updater import SystemUpdater, UpdateThread, GITHUB_REPO_URL
 
 
 class UserFormDialog(QDialog):
@@ -27,6 +28,9 @@ class UserFormDialog(QDialog):
         self.is_edit = (username is not None)
         self.setWindowTitle(f"Modificar Usuario: {username}" if self.is_edit else "Crear Nuevo Usuario RBAC")
         self.setMinimumWidth(400)
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self.setStyleSheet("""
             QDialog {
                 background-color: #0f172a;
@@ -182,6 +186,269 @@ class UserFormDialog(QDialog):
         }
 
 
+class GitHubUpdateDialog(QDialog):
+    """Diálogo interactivo para comprobar y aplicar actualizaciones desde GitHub preservando configuraciones."""
+    def __init__(self, db_manager, parent=None):
+        super().__init__(parent)
+        self.db = db_manager
+        self.updater = SystemUpdater()
+        self.worker = None
+
+        self.setWindowTitle("Sincronización y Actualización desde GitHub - VIGI-WIN PRO")
+
+        # Adaptabilidad automática a la resolución del monitor
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(620, max(460, int(avail.width() * 0.82)))
+            target_h = min(500, max(380, int(avail.height() * 0.80)))
+            self.resize(target_w, target_h)
+        else:
+            self.resize(580, 480)
+        self.setMinimumSize(460, 360)
+
+        # Icono de ventana
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0b1120;
+                color: #f1f5f9;
+            }
+            QLabel {
+                color: #cbd5e1;
+            }
+            QPushButton {
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QTextEdit {
+                background-color: #020617;
+                color: #34d399;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 8px;
+            }
+            QProgressBar {
+                background-color: #0f172a;
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                height: 8px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #10b981;
+                border-radius: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        # Encabezado
+        hdr = QHBoxLayout()
+        icon_lbl = QLabel("🔄")
+        icon_lbl.setStyleSheet("font-size: 26px;")
+        hdr.addWidget(icon_lbl)
+
+        hdr_col = QVBoxLayout()
+        lbl_title = QLabel("Actualizador Oficial desde GitHub")
+        lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #10b981;")
+        hdr_col.addWidget(lbl_title)
+
+        lbl_repo = QLabel(f"<b>Repositorio:</b> {GITHUB_REPO_URL}")
+        lbl_repo.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        hdr_col.addWidget(lbl_repo)
+        hdr.addLayout(hdr_col)
+        layout.addLayout(hdr)
+
+        # Banner de Protección Estricta de Configuración
+        notice_box = QFrame()
+        notice_box.setStyleSheet("background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 10px;")
+        notice_layout = QHBoxLayout(notice_box)
+        lbl_shield = QLabel("🛡️")
+        lbl_shield.setStyleSheet("font-size: 18px;")
+        notice_layout.addWidget(lbl_shield)
+        lbl_notice = QLabel("<b>Garantía de Preservación de Datos:</b> Al actualizar el programa desde GitHub, "
+                            "no se modificará ninguna configuración del usuario. Los parámetros de cámaras, "
+                            "usuarios RBAC, umbrales y base de datos SQLite permanecen 100% protegidos.")
+        lbl_notice.setWordWrap(True)
+        lbl_notice.setStyleSheet("font-size: 10px; color: #a7f3d0; line-height: 1.4;")
+        notice_layout.addWidget(lbl_notice)
+        layout.addWidget(notice_box)
+
+        # Barra de progreso y estado
+        self.lbl_status = QLabel("Conectando con GitHub...")
+        self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #38bdf8;")
+        layout.addWidget(self.lbl_status)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        layout.addWidget(self.progress_bar)
+
+        # Consola de detalles de cambios
+        lbl_log = QLabel("Registro de cambios y estado de sincronización:")
+        lbl_log.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        layout.addWidget(lbl_log)
+
+        self.txt_log = QTextEdit()
+        self.txt_log.setReadOnly(True)
+        layout.addWidget(self.txt_log)
+
+        # Botonera de acciones
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+
+        self.btn_check_again = QPushButton("🔍 Comprobar Nuevamente")
+        self.btn_check_again.setStyleSheet("background-color: #1e293b; color: #f1f5f9; border: 1px solid #334155;")
+        self.btn_check_again.clicked.connect(self.start_check)
+        btn_box.addWidget(self.btn_check_again)
+
+        btn_box.addStretch()
+
+        self.btn_apply = QPushButton("⚡ Aplicar Cambios Detectados")
+        self.btn_apply.setEnabled(False)
+        self.btn_apply.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: #020617;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:disabled {
+                background-color: #1e293b;
+                color: #64748b;
+            }
+        """)
+        self.btn_apply.clicked.connect(self.apply_changes)
+        btn_box.addWidget(self.btn_apply)
+
+        self.btn_close = QPushButton("Cerrar")
+        self.btn_close.setStyleSheet("background-color: #1e293b; color: #94a3b8; border: 1px solid #334155;")
+        self.btn_close.clicked.connect(self.accept)
+        btn_box.addWidget(self.btn_close)
+
+        layout.addLayout(btn_box)
+
+        # Iniciar comprobación automáticamente al abrir
+        self.start_check()
+
+    def start_check(self):
+        self.progress_bar.setRange(0, 0)
+        self.btn_apply.setEnabled(False)
+        self.btn_check_again.setEnabled(False)
+        self.lbl_status.setText("Conectando a GitHub y buscando cambios...")
+        self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #38bdf8;")
+        self.txt_log.setPlainText("Consultando repositorio remoto https://github.com/SANDAVID14/VIGIWIN-PRO.git...\n")
+
+        self.worker = UpdateThread(mode="check", db_manager=self.db, parent=self)
+        self.worker.check_finished.connect(self._on_check_finished)
+        self.worker.start()
+
+    def _on_check_finished(self, res: dict):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.btn_check_again.setEnabled(True)
+
+        if not res.get("success"):
+            self.lbl_status.setText(f"❌ {res.get('message', 'Error de conexión')}")
+            self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #ef4444;")
+            self.txt_log.append(f"\nDetalle:\n{res.get('error', 'Sin detalle')}")
+            return
+
+        if res.get("has_updates"):
+            commits = res.get("commits", [])
+            changed = res.get("changed_files", [])
+            self.lbl_status.setText(f"⚡ Se encontraron {len(commits)} nueva(s) actualización(es) en GitHub.")
+            self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #f59e0b;")
+            self.btn_apply.setEnabled(True)
+
+            log_text = f"Commit local actual:  {res.get('local_commit')}\n"
+            log_text += f"Commit remoto GitHub: {res.get('remote_commit')}\n"
+            log_text += f"\n--- LISTA DE ACTUALIZACIONES DISPONIBLES ({len(commits)}) ---\n"
+            for c in commits:
+                log_text += f"• {c}\n"
+
+            if changed:
+                log_text += f"\n--- ARCHIVOS QUE SE ACTUALIZARÁN ({len(changed)}) ---\n"
+                for f in changed:
+                    log_text += f"  → {f}\n"
+
+            log_text += "\n[PROTECCIÓN ACTIVA] Base de datos SQLite y datos de usuario NO se modificarán."
+            self.txt_log.setPlainText(log_text)
+        else:
+            self.lbl_status.setText("✅ El sistema se encuentra en su versión más reciente.")
+            self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #10b981;")
+            self.btn_apply.setEnabled(False)
+            self.txt_log.setPlainText(
+                f"Commit activo: {res.get('local_commit')}\n"
+                "El software coincide exactamente con la rama oficial de GitHub.\n"
+                "No existen cambios pendientes de aplicar.\n\n"
+                "Todas sus configuraciones de usuario están vigentes e intactas."
+            )
+
+    def apply_changes(self):
+        confirm = QMessageBox.question(
+            self,
+            "Confirmar Actualización",
+            "¿Desea aplicar los cambios desde GitHub ahora?\n\n"
+            "• Se descargará y aplicará el código más reciente.\n"
+            "• Se realizará un respaldo preventivo automático de su base de datos.\n"
+            "• Su configuración, usuarios, cámaras e histórico permanecerán 100% protegidos.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        self.btn_apply.setEnabled(False)
+        self.btn_check_again.setEnabled(False)
+        self.progress_bar.setRange(0, 0)
+        self.lbl_status.setText("Aplicando cambios desde GitHub...")
+        self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #38bdf8;")
+
+        self.worker = UpdateThread(mode="apply", db_manager=self.db, parent=self)
+        self.worker.apply_finished.connect(self._on_apply_finished)
+        self.worker.start()
+
+    def _on_apply_finished(self, res: dict):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.btn_check_again.setEnabled(True)
+
+        if res.get("success"):
+            self.lbl_status.setText("✅ ¡Actualización completada exitosamente!")
+            self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #10b981;")
+            self.txt_log.append(f"\n{res.get('message', '')}")
+            if res.get("backup_path"):
+                self.txt_log.append(f"\nCopia preventiva generada en: {res.get('backup_path')}")
+            QMessageBox.information(
+                self,
+                "Actualización Exitosa",
+                res.get("message", "Actualización aplicada con éxito.")
+            )
+            self.btn_close.setText("Listo")
+        else:
+            self.lbl_status.setText("❌ Error al aplicar cambios.")
+            self.lbl_status.setStyleSheet("font-size: 11px; font-weight: bold; color: #ef4444;")
+            self.txt_log.append(f"\nError: {res.get('error', 'Fallo desconocido')}")
+            QMessageBox.critical(
+                self,
+                "Error de Actualización",
+                f"No se pudieron aplicar los cambios:\n{res.get('error', 'Error desconocido')}"
+            )
+
+
 class AdminTab(QWidget):
     def __init__(self, db_manager, camera_manager, rbac_manager=None, parent=None):
         super().__init__(parent)
@@ -261,7 +528,52 @@ class AdminTab(QWidget):
         self.btn_sw_audit.clicked.connect(lambda: self._quick_switch_session("auditor"))
         header_row.addWidget(self.btn_sw_audit)
 
+        # Botón Actualizar (ADMINISTRACION RBAC / Administrador)
+        self.btn_update_github = QPushButton("🔄 Actualizar")
+        self.btn_update_github.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_update_github.setStyleSheet("""
+            QPushButton {
+                background-color: #065f46;
+                color: #ffffff;
+                border: 1px solid #10b981;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:disabled {
+                background-color: #1e293b;
+                color: #64748b;
+                border: 1px solid #334155;
+            }
+        """)
+        self.btn_update_github.setToolTip("Conectar con https://github.com/SANDAVID14/VIGIWIN-PRO.git, verificar y aplicar cambios")
+        self.btn_update_github.clicked.connect(self._open_github_updater_dialog)
+        header_row.addWidget(self.btn_update_github)
+
         rbac_layout.addLayout(header_row)
+
+        # 1.1.2 Barra Informativa de Sincronización GitHub y Preservación de Datos
+        update_banner = QFrame()
+        update_banner.setStyleSheet("background-color: #090e1a; border: 1px solid #1e293b; border-radius: 6px; padding: 6px 12px;")
+        update_banner_layout = QHBoxLayout(update_banner)
+        update_banner_layout.setContentsMargins(6, 4, 6, 4)
+        update_banner_layout.setSpacing(10)
+
+        lbl_git_repo = QLabel("🐙 <b>GitHub:</b> https://github.com/SANDAVID14/VIGIWIN-PRO.git (Rama master)")
+        lbl_git_repo.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        update_banner_layout.addWidget(lbl_git_repo)
+
+        update_banner_layout.addStretch()
+
+        self.lbl_git_status = QLabel("Listo para verificar cambios | Preservación de configuración activa")
+        self.lbl_git_status.setStyleSheet("color: #34d399; font-size: 10px; font-weight: bold;")
+        update_banner_layout.addWidget(self.lbl_git_status)
+
+        rbac_layout.addWidget(update_banner)
 
         # 1.2 Layout de 2 Columnas: Gestión de Usuarios (Izquierda) + Matriz de Permisos (Derecha)
         rbac_grid = QHBoxLayout()
@@ -1387,6 +1699,10 @@ class AdminTab(QWidget):
         # 5. Backup
         self.btn_restore.setEnabled(is_admin)
 
+        # 6. Actualizador oficial desde GitHub (Exclusivo Administrador)
+        if hasattr(self, 'btn_update_github'):
+            self.btn_update_github.setEnabled(is_admin)
+
         # Tooltips restrictivos
         tip = "" if is_admin else "Restringido: Solo el Administrador tiene permisos para realizar esta acción."
         self.btn_create_user.setToolTip(tip)
@@ -1396,6 +1712,24 @@ class AdminTab(QWidget):
         if hasattr(self, 'btn_add_device'):
             self.btn_add_device.setToolTip(tip)
         self.btn_restore.setToolTip(tip)
+        if hasattr(self, 'btn_update_github'):
+            self.btn_update_github.setToolTip(tip or "Conectar con https://github.com/SANDAVID14/VIGIWIN-PRO.git, verificar y aplicar cambios")
 
         self._refresh_session_banner()
         self._refresh_users_table()
+
+    def _open_github_updater_dialog(self):
+        """Abre el asistente gráfico de verificación y actualización desde GitHub."""
+        curr_role = self.rbac_mgr.get_current_role()
+        if curr_role != "Administrador":
+            QMessageBox.warning(
+                self,
+                "Acceso Restringido",
+                "Únicamente los usuarios con rol de 'Administrador' tienen permisos para "
+                "conectar y actualizar el sistema desde el repositorio oficial de GitHub."
+            )
+            return
+
+        dlg = GitHubUpdateDialog(self.db, parent=self)
+        dlg.exec()
+
